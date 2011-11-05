@@ -33,7 +33,7 @@ def main (args = None):
     args = sys.argv[1:]
 
   if not args:
-    print 'Usage: %s COMMAND [ARGS] [KWDS]' % os.path.split(sys.argv[0])[-1]
+    print 'Usage: %s COMMAND [ARGS]' % os.path.split(sys.argv[0])[-1]
     for name,(fun,_) in  __commands:
       print '\n%s %s\n  %s' % (
           name,

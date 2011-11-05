@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
+import time
 import twitter # Python Twitter Tools (not the homonymous Python-Twitter)
-import urllib2  # for .quote, .unquote
 import sqlite3
 from matplotlib import pyplot
 import main
@@ -20,7 +20,7 @@ class CachedSearcher:
 
     self.search = twitter.Twitter(domain='search.twitter.com').search
 
-    self.db = sqlite3.connect('data/bands.db')
+    self.db = sqlite3.connect('/data/sna/bands.db')
     self.db_cursor = self.db.cursor()
 
     self.init_db()
@@ -35,8 +35,6 @@ class CachedSearcher:
       order by name
       ''',
       )]
-
-    print tables # DEBUG
 
     if 'searches' not in tables:
       self.db_cursor.execute(
@@ -93,14 +91,13 @@ class CachedSearcher:
     for page_num in range(1,150):
 
       page = self.search(
-          q = urllib2.quote(query),
+          q = query,
           tweet_type = 'recent',
           with_twitter_user_id = True,
           page = page_num,
           since_id = old_since_id,
           )
 
-      print page # DEBUG
       new_tweets = page['results']
 
       if new_tweets:
@@ -126,10 +123,6 @@ class CachedSearcher:
             tweet['text'])
          for tweet in tweets ]
 
-      #DEBUG
-      for tweet in tweets_data:
-        print tweet
-
       self.db_cursor.executemany(
         '''
         insert into tweets
@@ -146,7 +139,9 @@ class CachedSearcher:
 
     self.db.commit()
 
-  def __call__ (self, query):
+    return len(tweets)
+
+  def search (self, query):
 
     self.add_new_results(query)
 
@@ -175,41 +170,33 @@ class CachedSearcher:
     else:
       return results
 
-search = CachedSearcher()
+  def update_db (self):
+
+    queries = list(self.db_cursor.execute('select query from searches'))
+
+    print time.asctime()
+
+    for row in queries:
+      query = row[0]
+      num_tweets = self.add_new_results(query)
+      print 'added %i new tweets about %r' % (num_tweets, query)
+
+  def get_queries (self):
+
+    queries = list(self.db_cursor.execute('select query from searches'))
+
+    return [row[0] for row in queries]
+
+#----( commands )-------------------------------------------------------------
+
+searcher = CachedSearcher()
 
 @main.command
-def get_earwig_clients ():
-  'returns list of synonyms of earwig clients'
-
-  clients = [
-      [ name.strip() for name in line.split('=') ]
-      for line in open('data/earwig_clients.text').readlines()
-      if not line.isspace()
-      ]
-
-  if main.at_top():
-    for names in clients:
-      print '\n  = '.join(names)
-  else:
-    return clients
-
-def print_tweet (t):
-  print t
-  # print '''\
-  # id: %s
-  # from_user_id: %s
-  # to_user_id: %s
-  # created_at: %s
-  # geo: %s
-  # text: %s
-  # ''' % t
-
-@main.command
-def cached_search (query):
-  'searches twitter & caches result'
+def search (query):
+  'searches twitter & caches result in local database'
 
   print query
-  results = search(query)
+  results = searcher.search(query)
 
   if main.at_top():
     for t in results:
@@ -218,20 +205,18 @@ def cached_search (query):
   else:
     return results
 
+@main.command
+def update ():
+  'updates all search terms'
+
+  searcher.update_db()
 
 @main.command
-def init_db ():
-  'initializes database of cached tweets'
-  c = db.cursor()
-  c.execute('''
-      create table tweets
-      ()
-      ''')
-
-@main.command
-def help ():
-  'just a test'
-  pass
+def queries ():
+  'lists cached queries'
+  print 'cached queries:'
+  for query in searcher.get_queries():
+    print '  %s' % query
 
 if __name__ == '__main__': main.main()
 
