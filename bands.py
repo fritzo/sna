@@ -16,11 +16,11 @@ search = twitter.Twitter(domain='search.twitter.com').search
 
 class CachedSearcher:
 
-  def __init__ (self):
+  def __init__ (self, database = '/data/sna/bands.db'):
 
-    self.search = twitter.Twitter(domain='search.twitter.com').search
+    self.twitter_search = twitter.Twitter(domain='search.twitter.com').search
 
-    self.db = sqlite3.connect('/data/sna/bands.db')
+    self.db = sqlite3.connect(database)
     self.db_cursor = self.db.cursor()
 
     self.init_db()
@@ -90,7 +90,7 @@ class CachedSearcher:
     tweets = []
     for page_num in range(1,150):
 
-      page = self.search(
+      page = self.twitter_search(
           q = query,
           tweet_type = 'recent',
           with_twitter_user_id = True,
@@ -201,7 +201,7 @@ def search (query):
   if main.at_top():
     for t in results:
       print '-' * 80
-      print_tweet(t)
+      print t
   else:
     return results
 
