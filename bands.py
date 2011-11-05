@@ -8,6 +8,10 @@ import main
 
 def TODO (message = None): raise NotImplementedError(message)
 
+def zero_if_none (x):
+  if x is None: return 0
+  else:         return x
+
 search = twitter.Twitter(domain='search.twitter.com').search
 
 class CachedSearcher:
@@ -16,87 +20,74 @@ class CachedSearcher:
 
     self.search = twitter.Twitter(domain='search.twitter.com').search
 
-    self.db = sqlite3.connect('data/bands.sqlite3')
+    self.db = sqlite3.connect('data/bands.db')
     self.db_cursor = self.db.cursor()
 
-    self.update_db()
+    self.init_db()
 
-  def update_db (self):
+  def init_db (self):
 
-    execute = self.db_cursor.execute
-
-    tables = [ row[0] for row in execute(
+    tables = [ row[0] for row in self.db_cursor.execute(
       '''
       select name
       from sqlite_master
-      where type='table'
+      where type = 'table'
       order by name
       ''',
-      ))]
+      )]
 
     print tables # DEBUG
 
     if 'searches' not in tables:
-      execute(
+      self.db_cursor.execute(
         '''
-        create table searches (
-          query text,
-          latest_id int
-          )
+        create table searches (query text, latest_id long)
         ''')
 
     if 'search_results' not in tables:
-      execute(
+      self.db_cursor.execute(
         '''
-        create table search_results (
-          query text,
-          tweet_id int
-          )
+        create table search_results (query text, tweet_id long)
         ''')
 
     if 'tweets' not in tables:
-      execute(
+      self.db_cursor.execute(
         '''
         create table tweets (
-          tweet_id int,
-          from_id int,
-          to_id int,
+          tweet_id long,
+          from_user_id long,
+          to_user_id long,
           geo text,
           created_at text,
-          text text
-          )
+          text text)
         ''')
 
-  def get_latest_id (self):
+  def get_latest_id (self, query):
 
-    rows = execute(
+    rows = list(self.db_cursor.execute(
       '''
-      select latest_id from searches where query='?'
+      select latest_id from searches where query=(?)
       ''',
-      (query,))
+      (query,)))
 
     if rows:
 
-      return row[0]
+      return rows[0][0]
 
     else:
 
-      execute(
+      self.db_cursor.execute(
         '''
-        update searches
-        set latest_id=0
-        where query='?'
+        insert into searches (query, latest_id) values (?, 0)
         ''',
-        (query,)
-        )
+        (query,))
 
       return 0
 
   def add_new_results (self, query):
 
     since_id = self.get_latest_id(query)
-
-    execute = self.db_cursor.execute
+    old_since_id = since_id
 
     tweets = []
     for page_num in range(1,150):
@@ -106,7 +97,7 @@ class CachedSearcher:
           tweet_type = 'recent',
           with_twitter_user_id = True,
           page = page_num,
-          since_id = since_id,
+          since_id = old_since_id,
           )
 
       print page # DEBUG
@@ -120,55 +111,69 @@ class CachedSearcher:
 
     if tweets:
 
-      execute(
+      self.db_cursor.execute(
         '''
-        update searches
-        set since_id='?'
-        where query='?'
+        update searches set latest_id = (?) where query = (?)
         ''',
-        (since_id, query)
-        )
+        (since_id, query))
 
-      for tweet in tweets:
-        execute(
-          '''
-          insert into tweets
-          set 
-            tweet_id='?'
-            from_id='?'
-            to_id='?'
-            geo='?'
-            created_at='?'
-            text='?'
-          ''',
+      tweets_data = [
           ( tweet['id'],
-            tweet['from_id'],
-            tweet['to_id'],
-            tweet['geo'],
+            zero_if_none(tweet['from_user_id']),
+            zero_if_none(tweet['to_user_id']),
+            zero_if_none(tweet['geo']),
             tweet['created_at'],
-            tweet['text'],
-            )
-          )
+            tweet['text'])
+         for tweet in tweets ]
 
-  def __call__ (query):
+      #DEBUG
+      for tweet in tweets_data:
+        print tweet
 
-    execute = self.db_cursor.execute
+      self.db_cursor.executemany(
+        '''
+        insert into tweets
+        (tweet_id, from_user_id, to_user_id, geo, created_at, text)
+        values (?,?,?,?,?,?)
+        ''',
+        tweets_data)
+
+      self.db_cursor.executemany(
+        '''
+        insert into search_results (query, tweet_id) values (?,?)
+        ''',
+        [ (query, tweet['id']) for tweet in tweets ])
+
+    self.db.commit()
+
+  def __call__ (self, query):
 
     self.add_new_results(query)
 
     # return new + old results
 
-    results = list(c.execute(
+    results = list(self.db_cursor.execute(
       '''
-      select *
-      from search_results inner join tweets
-      order by tweet_id
+      select
+        tweets.tweet_id,
+        tweets.from_user_id,
+        tweets.to_user_id,
+        tweets.geo,
+        tweets.created_at,
+        tweets.text
+      from search_results join tweets
+      on search_results.tweet_id = tweets.tweet_id
+      where query = (?)
+      order by tweets.tweet_id
       ''',
-      ))
+      (query,)))
 
     if main.at_top():
       for result in results:
-        print 
+        text = results[-1]
+        print '\n%s' % text
+    else:
+      return results
 
 search = CachedSearcher()
 
@@ -189,34 +194,22 @@ def get_earwig_clients ():
     return clients
 
 def print_tweet (t):
-  print 'id: %s' % t.id
-  print 'from_user_id: %s' % t.from_user_id
-  print 'to_user_id: %s' % t.to_user_id
-  print 'created_at: %' % t.created_at
-  print 'geo: %' % t.geo
-  print 'text: %s' % t.text
+  print t
+  # print '''\
+  # id: %s
+  # from_user_id: %s
+  # to_user_id: %s
+  # created_at: %s
+  # geo: %s
+  # text: %s
+  # ''' % t
 
 @main.command
-def local_search (query, location = 'seattle'):
-  'searches a phrase in a specific location'
+def cached_search (query):
+  'searches twitter & caches result'
 
   print query
-  urllib2.quote(query)
-
-  results = []
-  for page_num in range(1,150):
-    page = search(
-        q = query,
-        near = location,
-        result_type = 'recent',
-        with_twitter_user_id = True,
-        page = page_num,
-        )
-    print page # DEBUG
-    if page:
-      results += page
-    else:
-      break
+  results = search(query)
 
   if main.at_top():
     for t in results:
