@@ -11,6 +11,9 @@ def TODO (message = None): raise NotImplementedError(message)
 def zero_if_none (x):
   if x is None: return 0
   else:         return x
+def null_if_none (x):
+  if x is None: return ''
+  else:         return x
 
 search = twitter.Twitter(domain='search.twitter.com').search
 
@@ -118,7 +121,7 @@ class CachedSearcher:
           ( tweet['id'],
             zero_if_none(tweet['from_user_id']),
             zero_if_none(tweet['to_user_id']),
-            zero_if_none(tweet['geo']),
+            '', # TODO remove geo column
             tweet['created_at'],
             tweet['text'])
          for tweet in tweets ]
@@ -183,9 +186,12 @@ class CachedSearcher:
 
   def get_queries (self):
 
-    queries = list(self.db_cursor.execute('select query from searches'))
+    queries = list(self.db_cursor.execute(
+      'select count(*),query from search_results group by query'))
+    queries.sort()
+    queries.reverse()
 
-    return [row[0] for row in queries]
+    return queries
 
 #----( commands )-------------------------------------------------------------
 
@@ -202,6 +208,7 @@ def search (query):
     for t in results:
       print '-' * 80
       print t
+    print '\nsearch returned %i results' % len(results)
   else:
     return results
 
@@ -215,8 +222,8 @@ def update ():
 def queries ():
   'lists cached queries'
   print 'cached queries:'
-  for query in searcher.get_queries():
-    print '  %s' % query
+  for row in searcher.get_queries():
+    print '  %d\t%s' % row
 
 if __name__ == '__main__': main.main()
 
